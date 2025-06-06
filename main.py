@@ -1,16 +1,20 @@
 import os
-from fastapi import FastAPI, Depends
+import requests
+from fastapi import FastAPI, Depends, Form
 from sqlalchemy.orm import Session
 from db import SessionLocal, engine
 from models import Base
 from schemas import ChatInput
 from crud import get_all_docs
-import requests
 
+# Setup database
 Base.metadata.create_all(bind=engine)
 app = FastAPI()
-OLLAMA_API_URL = os.getenv("OLLAMA_API_URL")
 
+# Load env
+OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434/api/generate")
+
+# Dependency
 def get_db():
     db = SessionLocal()
     try:
@@ -18,38 +22,52 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/chat")
-def chat(input: ChatInput, db: Session = Depends(get_db)):
-    # Ambil semua dokumen internal untuk jadi konteks
-    docs = get_all_docs(db)
-    context = "\n\n".join(f"{d.title}:\n{d.content}" for d in docs)
 
-    # Gabungkan prompt dengan konteks
-    full_prompt = f"""
+def build_prompt(user_message: str, docs: list):
+    context = "\n\n".join(f"{d.title}:\n{d.content}" for d in docs)
+    return f"""
 Berikut adalah beberapa informasi internal perusahaan:\n\n{context}
 
 Jawab pertanyaan berikut berdasarkan informasi di atas:
-{input.message}
+{user_message}
 """.strip()
 
-    # Kirim ke Ollama
-    
-    response = requests.post(
-        OLLAMA_API_URL,
-        json={"model": "llama3", "prompt": full_prompt},
-        stream=True
-    )
 
-    full_response = ""
+def query_ollama(full_prompt: str):
+    try:
+        response = requests.post(
+            OLLAMA_API_URL,
+            json={"model": "llama3", "prompt": full_prompt},
+            stream=True,
+            timeout=60,
+        )
+    except Exception as e:
+        return f"[ERROR] Gagal request Ollama: {e}"
 
     if response.status_code != 200:
-        return {"error": f"Ollama error: {response.status_code}"}
+        return f"[ERROR] Ollama error: {response.status_code}"
 
+    full_response = ""
     for line in response.iter_lines():
         if line:
             line = line.decode("utf-8")
             if '"response":"' in line:
                 part = line.split('"response":"')[1].split('"')[0]
                 full_response += part
+    return full_response.strip()
 
-    return {"reply": full_response.strip()}
+
+@app.post("/chat")
+def chat(input: ChatInput, db: Session = Depends(get_db)):
+    docs = get_all_docs(db)
+    prompt = build_prompt(input.message, docs)
+    reply = query_ollama(prompt)
+    return {"reply": reply}
+
+
+@app.post("/slack/chat")
+def slack_chat(text: str = Form(...), db: Session = Depends(get_db)):
+    docs = get_all_docs(db)
+    prompt = build_prompt(text, docs)
+    reply = query_ollama(prompt)
+    return {"text": reply}
