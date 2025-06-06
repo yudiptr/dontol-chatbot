@@ -63,21 +63,25 @@ def chat(input: ChatInput, db: Session = Depends(get_db)):
     reply = query_ollama(prompt)
     return {"reply": reply}
 
+
+import threading
+
 @app.post("/slack/chat")
-async def slack_chat(
-    text: str = Form(...),
-    response_url: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    # Balas cepat ke Slack agar tidak timeout
-    asyncio.create_task(process_slack_response(text, response_url, db))
-    return ""  # Slack expects fast empty 200 OK response
+def slack_chat(text: str = Form(...), response_url: str = Form(...)):
+    threading.Thread(target=handle_slack_request, args=(text, response_url)).start()
+    return ""
 
-async def process_slack_response(text: str, response_url: str, db: Session):
-    docs = get_all_docs(db)
-    prompt = build_prompt(text, docs)
-    reply = query_ollama(prompt)
+def handle_slack_request(text: str, response_url: str):
+    db = SessionLocal()
+    try:
+        docs = get_all_docs(db)
+        prompt = build_prompt(text, docs)
+        reply = query_ollama(prompt)
+    finally:
+        db.close()
+        
+    try:
+        requests.post(response_url, json={"text": reply})
+    except Exception as e:
+        print(f"Gagal kirim Slack reply: {e}")
 
-    # Kirim ke Slack via response_url
-    async with httpx.AsyncClient() as client:
-        await client.post(response_url, json={"text": reply})
