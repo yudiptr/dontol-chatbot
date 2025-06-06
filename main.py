@@ -1,5 +1,7 @@
 import os
 import requests
+import httpx
+import asyncio
 from fastapi import FastAPI, Depends, Form
 from sqlalchemy.orm import Session
 from db import SessionLocal, engine
@@ -22,7 +24,6 @@ def get_db():
     finally:
         db.close()
 
-
 def build_prompt(user_message: str, docs: list):
     context = "\n\n".join(f"{d.title}:\n{d.content}" for d in docs)
     return f"""
@@ -31,7 +32,6 @@ Berikut adalah beberapa informasi internal perusahaan:\n\n{context}
 Jawab pertanyaan berikut berdasarkan informasi di atas:
 {user_message}
 """.strip()
-
 
 def query_ollama(full_prompt: str):
     try:
@@ -56,7 +56,6 @@ def query_ollama(full_prompt: str):
                 full_response += part
     return full_response.strip()
 
-
 @app.post("/chat")
 def chat(input: ChatInput, db: Session = Depends(get_db)):
     docs = get_all_docs(db)
@@ -64,10 +63,21 @@ def chat(input: ChatInput, db: Session = Depends(get_db)):
     reply = query_ollama(prompt)
     return {"reply": reply}
 
-
 @app.post("/slack/chat")
-def slack_chat(text: str = Form(...), db: Session = Depends(get_db)):
+async def slack_chat(
+    text: str = Form(...),
+    response_url: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    # Balas cepat ke Slack agar tidak timeout
+    asyncio.create_task(process_slack_response(text, response_url, db))
+    return ""  # Slack expects fast empty 200 OK response
+
+async def process_slack_response(text: str, response_url: str, db: Session):
     docs = get_all_docs(db)
     prompt = build_prompt(text, docs)
     reply = query_ollama(prompt)
-    return {"text": reply}
+
+    # Kirim ke Slack via response_url
+    async with httpx.AsyncClient() as client:
+        await client.post(response_url, json={"text": reply})
