@@ -69,7 +69,7 @@ import threading
 @app.post("/slack/chat")
 def slack_chat(text: str = Form(...), response_url: str = Form(...)):
     threading.Thread(target=handle_slack_request, args=(text, response_url)).start()
-    return ""
+    return "Baik, pertanyaan kamu sedang diproses. Mohon tunggu sebentar..."
 
 def handle_slack_request(text: str, response_url: str):
     db = SessionLocal()
