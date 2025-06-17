@@ -37,7 +37,7 @@ def query_ollama(full_prompt: str):
     try:
         response = requests.post(
             OLLAMA_API_URL,
-            json={"model": "mistral:7b-instruct-q4_K_M", "prompt": full_prompt},
+            json={"model": "llama3", "prompt": full_prompt},
             stream=True,
             timeout=60,
         )
