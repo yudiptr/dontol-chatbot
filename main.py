@@ -33,6 +33,8 @@ Jawab pertanyaan berikut berdasarkan informasi di atas:
 {user_message}
 """.strip()
 
+import json
+
 def query_ollama(full_prompt: str):
     try:
         response = requests.post(
@@ -50,11 +52,11 @@ def query_ollama(full_prompt: str):
     full_response = ""
     for line in response.iter_lines():
         if line:
-            line = line.decode("utf-8")
-            if '"response":"' in line:
-                part = line.split('"response":"')[1].split('"')[0]
-                full_response += part
+            data = json.loads(line.decode("utf-8"))
+            part = data.get("response", "")
+            full_response += part
     return full_response.strip()
+
 
 @app.post("/chat")
 def chat(input: ChatInput, db: Session = Depends(get_db)):
